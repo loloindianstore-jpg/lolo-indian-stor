@@ -1,0 +1,8 @@
+{
+  "name": "Remix متجر لولو الهندية",
+  "description": "متجر لولو الهندية للعناية بالشعر والبشرة مع ميزة إضافة صور ووصف المنتجات وواجهة عصرية سهلة الاستخدام والتنقل",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
