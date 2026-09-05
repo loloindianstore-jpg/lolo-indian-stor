@@ -21,6 +21,8 @@ import { DiscountBar } from './components/DiscountBar';
 import { Footer } from './components/Footer';
 import { AdminDashboard } from './components/AdminDashboard';
 import { AdminLoginModal } from './components/AdminLoginModal';
+import { MandatoryAuthScreen } from './components/MandatoryAuthScreen';
+import { AuthModal } from './components/AuthModal';
 import { PRESET_IMAGES } from './data/categories';
 import { CheckCircle2, ShieldAlert, Heart, X, Sparkles } from 'lucide-react';
 
@@ -37,25 +39,25 @@ export default function App() {
     }
   });
 
+  // Account modal for logged-in user details and logout
+  const [isAccountModalOpen, setIsAccountModalOpen] = useState(false);
+
   // Security redirect toast when unauthorized access to admin route occurs
   const [securityRedirectNotice, setSecurityRedirectNotice] = useState<string | null>(null);
 
-  // 1. Current Authenticated User Account
+  // 1. Current Authenticated User Account (Mandatory session persistence in LocalStorage)
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     try {
-      const saved = localStorage.getItem('lulu_current_user');
-      if (saved) return JSON.parse(saved);
-      return {
-        email: 'customer@lulu-shop.com',
-        role: 'customer',
-        name: 'زبونة المتجر',
-      };
+      const saved = localStorage.getItem('lulu_auth_session');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.isLoggedIn) {
+          return parsed;
+        }
+      }
+      return null;
     } catch {
-      return {
-        email: 'customer@lulu-shop.com',
-        role: 'customer',
-        name: 'زبونة المتجر',
-      };
+      return null;
     }
   });
 
@@ -501,6 +503,36 @@ export default function App() {
     );
   };
 
+  // Handler for mandatory login gate
+  const handleMandatoryLoginSuccess = (account: UserAccount) => {
+    setCurrentUser(account);
+    try {
+      localStorage.setItem('lulu_auth_session', JSON.stringify(account));
+    } catch (e) {
+      console.error(e);
+    }
+    if (account.role === 'owner') {
+      setIsAdminAuthenticated(true);
+      sessionStorage.setItem('lulu_admin_authenticated', 'true');
+    }
+  };
+
+  // Full logout: locks application immediately back to MandatoryAuthScreen
+  const handleUserLogout = () => {
+    try {
+      localStorage.removeItem('lulu_auth_session');
+      sessionStorage.removeItem('lulu_admin_authenticated');
+      sessionStorage.removeItem('lulu_admin_auth_time');
+    } catch (e) {
+      console.error(e);
+    }
+    setIsAdminAuthenticated(false);
+    setCurrentUser(null);
+    setCurrentView('store');
+    setIsAccountModalOpen(false);
+    window.location.hash = '';
+  };
+
   // Switch between views
   const handleLoginSuccess = () => {
     setIsAdminAuthenticated(true);
@@ -516,11 +548,7 @@ export default function App() {
   };
 
   const handleLogoutAdmin = () => {
-    sessionStorage.removeItem('lulu_admin_authenticated');
-    sessionStorage.removeItem('lulu_admin_auth_time');
-    setIsAdminAuthenticated(false);
-    setCurrentView('store');
-    window.location.hash = '';
+    handleUserLogout();
   };
 
   // Filtered products for public display (considers search, category, and wishlist filter)
@@ -532,6 +560,18 @@ export default function App() {
   }, [products, showOnlyWishlist, wishlistIds]);
 
   const totalCartCount = cart.reduce((sum, it) => sum + it.quantity, 0);
+
+  // ================= VIEW 0: MANDATORY AUTHENTICATION GATE =================
+  // If user is not authenticated, lock the entire app and render ONLY MandatoryAuthScreen.
+  // Neither the storefront, nor products, nor the cart drawer are rendered until sign-in.
+  if (!currentUser || !currentUser.isLoggedIn) {
+    return (
+      <MandatoryAuthScreen
+        ownerEmail={OWNER_EMAIL}
+        onLoginSuccess={handleMandatoryLoginSuccess}
+      />
+    );
+  }
 
   // ================= VIEW 1: PROTECTED OWNER ADMIN DASHBOARD =================
   if (currentView === 'admin' && isAdminAuthenticated) {
@@ -604,6 +644,7 @@ export default function App() {
       <Header
         cartCount={totalCartCount}
         wishlistCount={wishlistIds.length}
+        currentUser={currentUser}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenWishlist={() => {
           setShowOnlyWishlist(true);
@@ -621,6 +662,7 @@ export default function App() {
             '_blank'
           );
         }}
+        onOpenAccountModal={() => setIsAccountModalOpen(true)}
       />
 
       {/* Main Public Shopping Container */}
@@ -710,6 +752,19 @@ export default function App() {
         onRemoveItem={handleRemoveCartItem}
         onClearCart={handleClearCart}
         onPlaceOrder={handlePlaceOrder}
+      />
+
+      {/* User Account / Session Profile Modal with Logout */}
+      <AuthModal
+        isOpen={isAccountModalOpen}
+        onClose={() => setIsAccountModalOpen(false)}
+        currentUser={currentUser}
+        onLogout={handleUserLogout}
+        onOpenAdminDashboard={() => {
+          setIsAccountModalOpen(false);
+          setCurrentView('admin');
+          window.location.hash = 'admin';
+        }}
       />
 
       {/* Protected Admin Login Gate Modal */}

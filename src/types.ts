@@ -1,9 +1,18 @@
 export type UserRole = 'owner' | 'assistant' | 'customer';
 
+export type AuthProviderType = 'google' | 'phone' | 'email' | 'demo';
+
 export interface UserAccount {
   email: string;
   role: UserRole;
   name?: string;
+  phone?: string;
+  provider?: AuthProviderType;
+  avatarUrl?: string;
+  isLoggedIn?: boolean;
+  city?: string;
+  token?: string;
+  lastLoginAt?: number;
 }
 
 export interface Assistant {

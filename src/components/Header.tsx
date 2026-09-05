@@ -1,22 +1,27 @@
 import React from 'react';
-import { ShoppingBag, Heart, Search, HelpCircle, ShieldCheck } from 'lucide-react';
+import { ShoppingBag, Heart, Search, User, LogOut } from 'lucide-react';
+import { UserAccount } from '../types';
 
 interface HeaderProps {
   cartCount: number;
   wishlistCount: number;
+  currentUser: UserAccount | null;
   onOpenCart: () => void;
   onOpenWishlist: () => void;
   onOpenSearchFocus: () => void;
   onOpenSupport: () => void;
+  onOpenAccountModal: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
   cartCount,
   wishlistCount,
+  currentUser,
   onOpenCart,
   onOpenWishlist,
   onOpenSearchFocus,
   onOpenSupport,
+  onOpenAccountModal,
 }) => {
   return (
     <header className="sticky top-0 z-30 bg-[#FAF7F2]/95 backdrop-blur-md border-b border-[#EFE7DC] px-4 py-3 sm:px-6">
@@ -37,8 +42,26 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Customer Action Controls ONLY: Search, Wishlist, Cart */}
-        <div className="flex items-center gap-2">
+        {/* Customer Action Controls: Account, Search, Wishlist, Cart */}
+        <div className="flex items-center gap-1.5 sm:gap-2">
+          {/* User Account / Profile Button */}
+          {currentUser && (
+            <button
+              id="header-user-account-btn"
+              type="button"
+              onClick={onOpenAccountModal}
+              className="h-10 px-2.5 rounded-full bg-[#F3ECE1] hover:bg-[#EAE0D2] text-[#4A3728] flex items-center gap-1.5 transition-colors border border-[#E5DACB] text-xs font-bold"
+              title="حسابي / تسجيل الخروج"
+            >
+              <div className="w-6 h-6 rounded-full bg-[#7A4E2B] text-white flex items-center justify-center text-[10px] font-black shrink-0">
+                {currentUser.name ? currentUser.name.charAt(0) : 'ل'}
+              </div>
+              <span className="hidden sm:inline max-w-[80px] truncate">
+                {currentUser.name?.split(' ')[0] || 'حسابي'}
+              </span>
+            </button>
+          )}
+
           {/* Quick Search trigger button */}
           <button
             id="header-search-btn"
