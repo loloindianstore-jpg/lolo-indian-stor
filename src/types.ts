@@ -28,6 +28,10 @@ export interface Product {
   imageUrl: string;
   description: string;
   createdAt: number;
+  rating?: number;
+  reviewsCount?: number;
+  isBestSeller?: boolean;
+  inStock?: boolean;
 }
 
 export interface Category {
@@ -40,5 +44,18 @@ export interface Category {
 export interface CartItem {
   product: Product;
   quantity: number;
+}
+
+export interface Order {
+  id: string;
+  customerName: string;
+  customerPhone: string;
+  city: string;
+  notes?: string;
+  items: CartItem[];
+  total: number;
+  discountSavings: number;
+  createdAt: number;
+  status: 'new' | 'confirmed' | 'delivered';
 }
 

@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Product, CartItem, UserAccount, Assistant, DiscountSettings } from './types';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Product,
+  CartItem,
+  UserAccount,
+  Assistant,
+  DiscountSettings,
+  Order,
+} from './types';
 import { TopBanner } from './components/TopBanner';
 import { Header } from './components/Header';
 import { SearchBar } from './components/SearchBar';
@@ -10,36 +17,49 @@ import { AddProductModal } from './components/AddProductModal';
 import { ProductDetailModal } from './components/ProductDetailModal';
 import { CartDrawer } from './components/CartDrawer';
 import { BottomNavigation } from './components/BottomNavigation';
-import { AuthModal } from './components/AuthModal';
-import { AssistantsModal } from './components/AssistantsModal';
 import { DiscountBar } from './components/DiscountBar';
+import { Footer } from './components/Footer';
+import { AdminDashboard } from './components/AdminDashboard';
+import { AdminLoginModal } from './components/AdminLoginModal';
 import { PRESET_IMAGES } from './data/categories';
-import { CheckCircle2, ShoppingBag } from 'lucide-react';
+import { CheckCircle2, ShieldAlert, Heart, X, Sparkles } from 'lucide-react';
 
 const OWNER_EMAIL = 'lolo.indian.store@gmail.com';
 
 export default function App() {
-  // 1. Current Authenticated User & Roles
+  // Current view: 'store' (public customer storefront) | 'admin' (protected owner dashboard)
+  const [currentView, setCurrentView] = useState<'store' | 'admin'>('store');
+  const [isAdminAuthenticated, setIsAdminAuthenticated] = useState<boolean>(() => {
+    try {
+      return sessionStorage.getItem('lulu_admin_authenticated') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  // Security redirect toast when unauthorized access to admin route occurs
+  const [securityRedirectNotice, setSecurityRedirectNotice] = useState<string | null>(null);
+
+  // 1. Current Authenticated User Account
   const [currentUser, setCurrentUser] = useState<UserAccount | null>(() => {
     try {
       const saved = localStorage.getItem('lulu_current_user');
       if (saved) return JSON.parse(saved);
-      // Default to personal owner account for the store owner
       return {
-        email: OWNER_EMAIL,
-        role: 'owner',
-        name: 'مالكة المتجر (لولو)',
+        email: 'customer@lulu-shop.com',
+        role: 'customer',
+        name: 'زبونة المتجر',
       };
     } catch {
       return {
-        email: OWNER_EMAIL,
-        role: 'owner',
-        name: 'مالكة المتجر (لولو)',
+        email: 'customer@lulu-shop.com',
+        role: 'customer',
+        name: 'زبونة المتجر',
       };
     }
   });
 
-  // 2. Appointed Assistants List
+  // 2. Appointed Assistants List (Persisted)
   const [assistants, setAssistants] = useState<Assistant[]>(() => {
     try {
       const saved = localStorage.getItem('lulu_store_assistants');
@@ -58,33 +78,49 @@ export default function App() {
     }
   });
 
-  // 3. Discount Settings (زر يمكن تفعيله والغاؤه)
+  // 3. Discount Settings (Controlled exclusively via Admin Dashboard)
   const [discount, setDiscount] = useState<DiscountSettings>(() => {
     try {
       const saved = localStorage.getItem('lulu_store_discount');
       if (saved) return JSON.parse(saved);
       return {
-        isEnabled: false,
+        isEnabled: true,
         percentage: 15,
-        title: 'عروض وخصومات حصرية لفترة محدودة ✨',
+        title: 'عروض وتخفيضات حصرية بمناسبة وصول شحنة الهند الجديدة ✨',
       };
     } catch {
       return {
-        isEnabled: false,
+        isEnabled: true,
         percentage: 15,
-        title: 'عروض وخصومات حصرية لفترة محدودة ✨',
+        title: 'عروض وتخفيضات حصرية بمناسبة وصول شحنة الهند الجديدة ✨',
       };
     }
   });
 
-  // 4. Products list (starts without products as requested)
+  // 4. Products list (Preloaded with Indian authentic beauty presets if empty)
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const saved = localStorage.getItem('lulu_store_products');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      console.error(e);
     }
+    return PRESET_IMAGES.map((preset, index) => ({
+      id: `prod_preset_${index + 1}`,
+      title: preset.title,
+      category: preset.category,
+      price: preset.price,
+      imageUrl: preset.url,
+      description: preset.description,
+      createdAt: Date.now() - index * 3600000,
+      rating: 4.9,
+      reviewsCount: 38 + index * 14,
+      inStock: true,
+      isBestSeller: index === 0 || index === 1,
+    }));
   });
 
   // 5. Shopping Cart
@@ -97,59 +133,121 @@ export default function App() {
     }
   });
 
-  // UI state
+  // 6. Customer Wishlist (Favorites)
+  const [wishlistIds, setWishlistIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('lulu_store_wishlist');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // 7. Store Orders (Persisted so owner can see them in Admin Dashboard)
+  const [orders, setOrders] = useState<Order[]>(() => {
+    try {
+      const saved = localStorage.getItem('lulu_store_orders');
+      if (saved) return JSON.parse(saved);
+      return [
+        {
+          id: 'ord_sample_1',
+          customerName: 'فاطمة الموسوي',
+          customerPhone: '07712345678',
+          city: 'بغداد - المنصور',
+          notes: 'التوصيل بعد الساعة الرابعة عصراً لطفا',
+          items: [
+            {
+              product: {
+                id: 'prod_preset_1',
+                title: 'زيت الحشيش الهندي الأصلي',
+                category: 'زيوت الشعر',
+                price: 25000,
+                imageUrl: PRESET_IMAGES[0].url,
+                description: PRESET_IMAGES[0].description,
+                createdAt: Date.now(),
+              },
+              quantity: 2,
+            },
+          ],
+          total: 55000,
+          discountSavings: 5000,
+          createdAt: Date.now() - 3600000 * 5,
+          status: 'new',
+        },
+      ];
+    } catch {
+      return [];
+    }
+  });
+
+  // UI state for public customer storefront
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [showOnlyWishlist, setShowOnlyWishlist] = useState(false);
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [isAssistantsModalOpen, setIsAssistantsModalOpen] = useState(false);
-  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+  const [isAdminLoginModalOpen, setIsAdminLoginModalOpen] = useState(false);
   const [selectedProductDetail, setSelectedProductDetail] = useState<Product | null>(null);
-  const [activeTab, setActiveTab] = useState<'home' | 'categories' | 'add' | 'cart' | 'account'>('home');
+  const [activeBottomNavTab, setActiveBottomNavTab] = useState<'home' | 'categories' | 'deals' | 'wishlist' | 'cart'>('home');
   const [sharedCartImportedNotice, setSharedCartImportedNotice] = useState<string | null>(null);
 
-  // Determine if current user can add products:
-  // "وايقونة اضافة منتج لاتظهر لدى العملاء فقط حسابي الشخصي واضافة ميزة تعيين مساعد يمكنه اضافة منتجات"
-  const isOwner = currentUser?.role === 'owner';
-  const isAuthorizedAssistant =
-    currentUser?.role === 'assistant' &&
-    assistants.some(
-      (a) =>
-        a.email.toLowerCase() === currentUser.email.toLowerCase() &&
-        a.canAddProducts
-    );
-  const canAddProducts = Boolean(isOwner || isAuthorizedAssistant);
+  // Admin-only modals (Add/Edit Product)
+  const [isAdminAddModalOpen, setIsAdminAddModalOpen] = useState(false);
+  const [productToEdit, setProductToEdit] = useState<Product | null>(null);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // ================= ROUTE SECURITY & REDIRECTION GUARD =================
+  // "تأمين مسارات اللوحة بحيث لو حاول أي زبون فتح رابط الإدارة إعادة توجيه مباشراً تلقائياً للواجهة الرئيسية للمتجر"
+  useEffect(() => {
+    const checkRouteAndEnforceSecurity = () => {
+      const hash = window.location.hash.toLowerCase();
+      const search = window.location.search.toLowerCase();
+      const isTryingToAccessAdmin =
+        hash.includes('admin') ||
+        hash.includes('dashboard') ||
+        search.includes('admin=true') ||
+        search.includes('dashboard=true');
+
+      if (isTryingToAccessAdmin) {
+        const authenticated = sessionStorage.getItem('lulu_admin_authenticated') === 'true';
+        if (!authenticated) {
+          // UNAUTHORIZED ATTEMPT: Automatically redirect to main store interface
+          window.location.hash = '';
+          const cleanUrl = window.location.pathname;
+          window.history.replaceState(null, '', cleanUrl);
+          setCurrentView('store');
+          setSecurityRedirectNotice(
+            '⛔ تم إعادة توجيهك تلقائياً للواجهة الرئيسية: لوحة التحكم مؤمنة ومخصصة لإدارة المتجر فقط بعد تسجيل الدخول المصرح به.'
+          );
+          setTimeout(() => {
+            setSecurityRedirectNotice(null);
+          }, 5000);
+        } else {
+          // Authorized owner session
+          setCurrentView('admin');
+        }
+      } else {
+        // Public store route
+        if (currentView === 'admin' && !hash.includes('admin')) {
+          setCurrentView('store');
+        }
+      }
+    };
+
+    // Check on initial load
+    checkRouteAndEnforceSecurity();
+
+    // Listen to hash / URL changes
+    window.addEventListener('hashchange', checkRouteAndEnforceSecurity);
+    window.addEventListener('popstate', checkRouteAndEnforceSecurity);
+
+    return () => {
+      window.removeEventListener('hashchange', checkRouteAndEnforceSecurity);
+      window.removeEventListener('popstate', checkRouteAndEnforceSecurity);
+    };
+  }, [currentView]);
 
   // Persistence effects
-  useEffect(() => {
-    try {
-      if (currentUser) {
-        localStorage.setItem('lulu_current_user', JSON.stringify(currentUser));
-      } else {
-        localStorage.removeItem('lulu_current_user');
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('lulu_store_assistants', JSON.stringify(assistants));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [assistants]);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem('lulu_store_discount', JSON.stringify(discount));
-    } catch (e) {
-      console.error(e);
-    }
-  }, [discount]);
-
   useEffect(() => {
     try {
       localStorage.setItem('lulu_store_products', JSON.stringify(products));
@@ -166,21 +264,49 @@ export default function App() {
     }
   }, [cart]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem('lulu_store_wishlist', JSON.stringify(wishlistIds));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [wishlistIds]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lulu_store_discount', JSON.stringify(discount));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [discount]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lulu_store_assistants', JSON.stringify(assistants));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [assistants]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('lulu_store_orders', JSON.stringify(orders));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [orders]);
+
   // Check URL for shared cart parameter on mount
-  // "مع وجود رابط لكل سلة يمكن مشاركتها"
   useEffect(() => {
     try {
       const url = new URL(window.location.href);
       const cartParam = url.searchParams.get('cart');
       if (cartParam) {
-        // Decode base64
         const decodedJson = decodeURIComponent(escape(atob(cartParam)));
         const parsedItems = JSON.parse(decodedJson);
 
         if (Array.isArray(parsedItems) && parsedItems.length > 0) {
           const newCartItems: CartItem[] = [];
-          const newProductsToAdd: Product[] = [];
-
           parsedItems.forEach((it: any) => {
             const product: Product = {
               id: it.id || 'prod_shared_' + Math.random().toString(36).substr(2, 6),
@@ -191,29 +317,18 @@ export default function App() {
               description: it.description || '',
               createdAt: Date.now(),
             };
-
             newCartItems.push({
               product,
               quantity: Math.max(1, Number(it.q) || 1),
             });
-
-            // Ensure product is also added to product store if missing
-            if (!products.some((p) => p.id === product.id)) {
-              newProductsToAdd.push(product);
-            }
           });
 
           setCart(newCartItems);
-          if (newProductsToAdd.length > 0) {
-            setProducts((prev) => [...newProductsToAdd, ...prev]);
-          }
-
           setSharedCartImportedNotice(
             `تم استيراد سلة المشتريات المشتركة بنجاح! تحتوي على (${newCartItems.length}) منتجات.`
           );
           setIsCartOpen(true);
 
-          // Clean url
           url.searchParams.delete('cart');
           window.history.replaceState({}, '', url.toString());
 
@@ -227,69 +342,7 @@ export default function App() {
     }
   }, []);
 
-  // Assistant handlers
-  const handleAddAssistant = (email: string, name: string, canAdd: boolean) => {
-    const newAssistant: Assistant = {
-      id: 'ast_' + Date.now(),
-      email,
-      name,
-      canAddProducts: canAdd,
-      createdAt: Date.now(),
-    };
-    setAssistants((prev) => [newAssistant, ...prev]);
-  };
-
-  const handleRemoveAssistant = (id: string) => {
-    setAssistants((prev) => prev.filter((a) => a.id !== id));
-  };
-
-  const handleToggleAssistantPermission = (id: string) => {
-    setAssistants((prev) =>
-      prev.map((a) =>
-        a.id === id ? { ...a, canAddProducts: !a.canAddProducts } : a
-      )
-    );
-  };
-
-  // Add / Edit Product
-  const handleSaveProduct = (
-    data: Omit<Product, 'id' | 'createdAt'>,
-    editId?: string
-  ) => {
-    if (editId) {
-      setProducts((prev) =>
-        prev.map((p) => (p.id === editId ? { ...p, ...data } : p))
-      );
-    } else {
-      const newProduct: Product = {
-        id: 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
-        ...data,
-        createdAt: Date.now(),
-      };
-      setProducts((prev) => [newProduct, ...prev]);
-    }
-    setProductToEdit(null);
-  };
-
-  const handleAddSampleProduct = (preset: typeof PRESET_IMAGES[0]) => {
-    const newProduct: Product = {
-      id: 'prod_' + Date.now(),
-      title: preset.title,
-      category: preset.category,
-      price: preset.price,
-      imageUrl: preset.url,
-      description: preset.description,
-      createdAt: Date.now(),
-    };
-    setProducts((prev) => [newProduct, ...prev]);
-  };
-
-  const handleDeleteProduct = (id: string) => {
-    setProducts((prev) => prev.filter((p) => p.id !== id));
-    setCart((prev) => prev.filter((item) => item.product.id !== id));
-  };
-
-  // Cart operations
+  // Customer Cart operations
   const handleAddToCart = (product: Product) => {
     setCart((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
@@ -324,32 +377,218 @@ export default function App() {
     setCart([]);
   };
 
-  // Navigation tab
-  const handleNavigate = (tab: 'home' | 'categories' | 'add' | 'cart' | 'account') => {
-    setActiveTab(tab);
+  const handlePlaceOrder = (newOrder: Order) => {
+    setOrders((prev) => [newOrder, ...prev]);
+  };
+
+  // Wishlist toggle
+  const handleToggleWishlist = (product: Product) => {
+    setWishlistIds((prev) =>
+      prev.includes(product.id)
+        ? prev.filter((id) => id !== product.id)
+        : [...prev, product.id]
+    );
+  };
+
+  // Customer Navigation handler
+  const handleCustomerNavigate = (tab: 'home' | 'categories' | 'deals' | 'wishlist' | 'cart') => {
+    setActiveBottomNavTab(tab);
     if (tab === 'home') {
+      setShowOnlyWishlist(false);
+      setSelectedCategory(null);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } else if (tab === 'categories') {
+      setShowOnlyWishlist(false);
       const el = document.getElementById('categories-section');
       el?.scrollIntoView({ behavior: 'smooth' });
-    } else if (tab === 'add') {
-      if (canAddProducts) {
-        setProductToEdit(null);
-        setIsAddModalOpen(true);
-      } else {
-        setIsAuthModalOpen(true);
-      }
+    } else if (tab === 'deals') {
+      setShowOnlyWishlist(false);
+      setSelectedCategory(null);
+      const el = document.getElementById('products-section');
+      el?.scrollIntoView({ behavior: 'smooth' });
+    } else if (tab === 'wishlist') {
+      setShowOnlyWishlist((prev) => !prev);
+      const el = document.getElementById('products-section');
+      el?.scrollIntoView({ behavior: 'smooth' });
     } else if (tab === 'cart') {
       setIsCartOpen(true);
-    } else if (tab === 'account') {
-      setIsAuthModalOpen(true);
     }
   };
 
+  // Admin Actions (EXCLUSIVE TO ADMIN DASHBOARD)
+  const handleOpenAddProduct = () => {
+    setProductToEdit(null);
+    setIsAdminAddModalOpen(true);
+  };
+
+  const handleEditProduct = (product: Product) => {
+    setProductToEdit(product);
+    setIsAdminAddModalOpen(true);
+  };
+
+  const handleSaveProductFromAdmin = (
+    data: Omit<Product, 'id' | 'createdAt'>,
+    editId?: string
+  ) => {
+    if (editId) {
+      setProducts((prev) =>
+        prev.map((p) => (p.id === editId ? { ...p, ...data } : p))
+      );
+    } else {
+      const newProduct: Product = {
+        id: 'prod_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        ...data,
+        createdAt: Date.now(),
+        rating: 5.0,
+        reviewsCount: 1,
+        inStock: true,
+      };
+      setProducts((prev) => [newProduct, ...prev]);
+    }
+    setProductToEdit(null);
+    setIsAdminAddModalOpen(false);
+  };
+
+  const handleDeleteProductFromAdmin = (id: string) => {
+    setProducts((prev) => prev.filter((p) => p.id !== id));
+    setCart((prev) => prev.filter((item) => item.product.id !== id));
+    setWishlistIds((prev) => prev.filter((item) => item !== id));
+  };
+
+  const handleAddSampleProductFromAdmin = (preset: typeof PRESET_IMAGES[0]) => {
+    const newProduct: Product = {
+      id: 'prod_' + Date.now(),
+      title: preset.title,
+      category: preset.category,
+      price: preset.price,
+      imageUrl: preset.url,
+      description: preset.description,
+      createdAt: Date.now(),
+      rating: 4.9,
+      reviewsCount: 24,
+      inStock: true,
+    };
+    setProducts((prev) => [newProduct, ...prev]);
+  };
+
+  // Assistant management handlers
+  const handleAddAssistant = (email: string, name: string, canAdd: boolean) => {
+    const newAssistant: Assistant = {
+      id: 'ast_' + Date.now(),
+      email,
+      name,
+      canAddProducts: canAdd,
+      createdAt: Date.now(),
+    };
+    setAssistants((prev) => [newAssistant, ...prev]);
+  };
+
+  const handleRemoveAssistant = (id: string) => {
+    setAssistants((prev) => prev.filter((a) => a.id !== id));
+  };
+
+  const handleToggleAssistantPermission = (id: string) => {
+    setAssistants((prev) =>
+      prev.map((a) =>
+        a.id === id ? { ...a, canAddProducts: !a.canAddProducts } : a
+      )
+    );
+  };
+
+  const handleUpdateOrderStatus = (orderId: string, status: Order['status']) => {
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, status } : o))
+    );
+  };
+
+  // Switch between views
+  const handleLoginSuccess = () => {
+    setIsAdminAuthenticated(true);
+    setIsAdminLoginModalOpen(false);
+    setCurrentView('admin');
+    window.location.hash = 'admin';
+  };
+
+  const handleExitAdmin = () => {
+    setCurrentView('store');
+    window.location.hash = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleLogoutAdmin = () => {
+    sessionStorage.removeItem('lulu_admin_authenticated');
+    sessionStorage.removeItem('lulu_admin_auth_time');
+    setIsAdminAuthenticated(false);
+    setCurrentView('store');
+    window.location.hash = '';
+  };
+
+  // Filtered products for public display (considers search, category, and wishlist filter)
+  const displayProducts = useMemo(() => {
+    if (showOnlyWishlist) {
+      return products.filter((p) => wishlistIds.includes(p.id));
+    }
+    return products;
+  }, [products, showOnlyWishlist, wishlistIds]);
+
   const totalCartCount = cart.reduce((sum, it) => sum + it.quantity, 0);
 
+  // ================= VIEW 1: PROTECTED OWNER ADMIN DASHBOARD =================
+  if (currentView === 'admin' && isAdminAuthenticated) {
+    return (
+      <>
+        <AdminDashboard
+          products={products}
+          discount={discount}
+          assistants={assistants}
+          orders={orders}
+          currentUser={currentUser}
+          onUpdateDiscount={setDiscount}
+          onOpenAddProduct={handleOpenAddProduct}
+          onEditProduct={handleEditProduct}
+          onDeleteProduct={handleDeleteProductFromAdmin}
+          onAddSampleProduct={handleAddSampleProductFromAdmin}
+          onAddAssistant={handleAddAssistant}
+          onRemoveAssistant={handleRemoveAssistant}
+          onToggleAssistantPermission={handleToggleAssistantPermission}
+          onUpdateOrderStatus={handleUpdateOrderStatus}
+          onExitAdmin={handleExitAdmin}
+          onLogoutAdmin={handleLogoutAdmin}
+        />
+
+        {/* Add/Edit Product Modal - EXCLUSIVELY ACCESSIBLE WITHIN ADMIN */}
+        <AddProductModal
+          isOpen={isAdminAddModalOpen}
+          onClose={() => {
+            setIsAdminAddModalOpen(false);
+            setProductToEdit(null);
+          }}
+          onSaveProduct={handleSaveProductFromAdmin}
+          productToEdit={productToEdit}
+        />
+      </>
+    );
+  }
+
+  // ================= VIEW 2: PUBLIC CUSTOMER STOREFRONT =================
+  // Customized purely for Browsing, Viewing, Cart, and Purchasing ONLY
   return (
-    <div className="min-h-screen bg-[#FAF7F2] text-[#2C1E18] flex flex-col selection:bg-[#34533F] selection:text-white pb-24">
+    <div className="min-h-screen bg-[#FAF7F2] text-[#2C1E18] flex flex-col selection:bg-[#34533F] selection:text-white pb-20">
+      {/* Security Auto-Redirect Notification (shows if an unauthorized customer tried to access #admin) */}
+      {securityRedirectNotice && (
+        <div className="sticky top-0 z-50 bg-rose-900 text-rose-100 py-3 px-4 text-center text-xs sm:text-sm font-bold flex items-center justify-center gap-2 shadow-lg border-b border-rose-700 animate-in slide-in-from-top duration-300">
+          <ShieldAlert className="w-5 h-5 text-rose-300 shrink-0" />
+          <span className="flex-1 max-w-xl text-right">{securityRedirectNotice}</span>
+          <button
+            type="button"
+            onClick={() => setSecurityRedirectNotice(null)}
+            className="p-1 hover:bg-rose-800 rounded-full"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* 1. Top Iraq Delivery Banner */}
       <TopBanner />
 
@@ -361,90 +600,99 @@ export default function App() {
         </div>
       )}
 
-      {/* 2. Header with Role Awareness & Conditional Add Button */}
+      {/* 2. Public Header (No Add Product button, No Admin Controls) */}
       <Header
         cartCount={totalCartCount}
-        currentUser={currentUser}
-        canAddProducts={canAddProducts}
+        wishlistCount={wishlistIds.length}
         onOpenCart={() => setIsCartOpen(true)}
-        onOpenAddProduct={() => {
-          setProductToEdit(null);
-          setIsAddModalOpen(true);
+        onOpenWishlist={() => {
+          setShowOnlyWishlist(true);
+          const el = document.getElementById('products-section');
+          el?.scrollIntoView({ behavior: 'smooth' });
         }}
-        onOpenAuth={() => setIsAuthModalOpen(true)}
-        onOpenAssistants={() => setIsAssistantsModalOpen(true)}
+        onOpenSearchFocus={() => {
+          const el = document.getElementById('store-search-bar');
+          el?.focus();
+          el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }}
+        onOpenSupport={() => {
+          window.open(
+            'https://wa.me/?text=%D9%85%D8%B1%D8%AD%D8%A8%D8%A7%D9%8B%20%D9%85%D8%AA%D8%AC%D8%B1%20%D9%84%D9%88%D9%84%D9%88%20%D8%A7%D9%84%D9%87%D9%86%D8%AF%D9%8A%D8%A9%D8%8C%20%D8%A3%D9%88%D8%AF%20%D8%A7%D9%84%D8%A7%D8%B3%D8%AA%D9%81%D8%B3%D8%A7%D8%B1%20%D8%B9%D9%86%20%D8%A7%D9%84%D9%85%D9%86%D8%AA%D8%AC%D8%A7%D8%AA',
+            '_blank'
+          );
+        }}
       />
 
-      {/* Main Container */}
+      {/* Main Public Shopping Container */}
       <main className="flex-1 w-full max-w-xl mx-auto px-4 sm:px-6 py-4 space-y-5">
-        {/* Discount Control Bar & Shopper Banner (زر تفعيل وإلغاء الخصومات) */}
-        <DiscountBar
-          discount={discount}
-          onUpdateDiscount={setDiscount}
-          isOwnerOrAssistant={canAddProducts}
+        {/* Public Discount Announcement Banner (No controls or inputs for customers) */}
+        <DiscountBar discount={discount} />
+
+        {/* Customer Search Bar */}
+        <SearchBar
+          value={searchQuery}
+          onChange={setSearchQuery}
         />
 
-        {/* Search Bar */}
-        <SearchBar value={searchQuery} onChange={setSearchQuery} />
+        {/* Wishlist Active Filter Banner */}
+        {showOnlyWishlist && (
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl flex items-center justify-between text-xs text-rose-800 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <Heart className="w-4 h-4 fill-rose-500 text-rose-500" />
+              <span className="font-bold">عرض المنتجات المفضلة لديكِ ({wishlistIds.length})</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowOnlyWishlist(false)}
+              className="text-xs font-bold text-rose-700 underline hover:text-rose-900"
+            >
+              عرض جميع المنتجات
+            </button>
+          </div>
+        )}
 
-        {/* Hero Banner matching screenshot */}
-        <HeroBanner
-          hasProducts={products.length > 0}
-          canAddProducts={canAddProducts}
-          onAddProduct={() => {
-            setProductToEdit(null);
-            setIsAddModalOpen(true);
-          }}
-          onExplore={() => {
-            const el = document.getElementById('products-section');
-            el?.scrollIntoView({ behavior: 'smooth' });
-          }}
-        />
-
-        {/* Categories Grid matching screenshot */}
-        <section id="categories-section" className="scroll-mt-20">
-          <CategoriesGrid
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
+        {/* SHEIN-style Hero Shopping Banner (Zero Add Buttons) */}
+        {!showOnlyWishlist && (
+          <HeroBanner
+            discount={discount}
+            onExplore={() => {
+              const el = document.getElementById('products-section');
+              el?.scrollIntoView({ behavior: 'smooth' });
+            }}
+            onExploreDeals={() => {
+              const el = document.getElementById('products-section');
+              el?.scrollIntoView({ behavior: 'smooth' });
+            }}
           />
-        </section>
+        )}
 
-        {/* Products Section */}
+        {/* Categories Grid */}
+        {!showOnlyWishlist && (
+          <section id="categories-section" className="scroll-mt-20">
+            <CategoriesGrid
+              selectedCategory={selectedCategory}
+              onSelectCategory={setSelectedCategory}
+            />
+          </section>
+        )}
+
+        {/* Public Product Section (Zero Add or Edit Buttons on public cards) */}
         <ProductSection
-          products={products}
+          products={displayProducts}
           selectedCategory={selectedCategory}
           searchQuery={searchQuery}
           discount={discount}
-          canAddProducts={canAddProducts}
+          wishlistIds={wishlistIds}
           onAddToCart={handleAddToCart}
-          onEdit={(product) => {
-            setProductToEdit(product);
-            setIsAddModalOpen(true);
-          }}
-          onDelete={handleDeleteProduct}
+          onToggleWishlist={handleToggleWishlist}
           onViewDetails={setSelectedProductDetail}
-          onOpenAddModal={() => {
-            setProductToEdit(null);
-            setIsAddModalOpen(true);
-          }}
-          onAddSampleProduct={handleAddSampleProduct}
         />
       </main>
 
-      {/* Add / Edit Product Modal - ONLY accessible by Authorized users */}
-      {canAddProducts && (
-        <AddProductModal
-          isOpen={isAddModalOpen}
-          onClose={() => {
-            setIsAddModalOpen(false);
-            setProductToEdit(null);
-          }}
-          onSaveProduct={handleSaveProduct}
-          productToEdit={productToEdit}
-        />
-      )}
+      {/* SHEIN-style Footer with Discreet Admin Portal Lock Gate */}
+      <Footer onOpenAdminLogin={() => setIsAdminLoginModalOpen(true)} />
 
-      {/* Product Detail Modal */}
+      {/* Customer Product Detail Modal (Browsing & Ordering only) */}
       <ProductDetailModal
         product={selectedProductDetail}
         discount={discount}
@@ -452,7 +700,7 @@ export default function App() {
         onAddToCart={handleAddToCart}
       />
 
-      {/* Shopping Cart Drawer with Share Link and Discount Support */}
+      {/* Customer Shopping Cart Drawer (Purchasing & Iraq Delivery) */}
       <CartDrawer
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -461,41 +709,23 @@ export default function App() {
         onUpdateQuantity={handleUpdateCartQuantity}
         onRemoveItem={handleRemoveCartItem}
         onClearCart={handleClearCart}
+        onPlaceOrder={handlePlaceOrder}
       />
 
-      {/* Email Authentication Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentUser={currentUser}
-        onLogin={setCurrentUser}
-        onLogout={() =>
-          setCurrentUser({
-            email: 'guest@lulu-shop.com',
-            role: 'customer',
-            name: 'زائرة المتجر',
-          })
-        }
+      {/* Protected Admin Login Gate Modal */}
+      <AdminLoginModal
+        isOpen={isAdminLoginModalOpen}
+        onClose={() => setIsAdminLoginModalOpen(false)}
+        onSuccessLogin={handleLoginSuccess}
         ownerEmail={OWNER_EMAIL}
-        assistants={assistants}
       />
 
-      {/* Assistants Management Modal (Owner Only) */}
-      <AssistantsModal
-        isOpen={isAssistantsModalOpen}
-        onClose={() => setIsAssistantsModalOpen(false)}
-        assistants={assistants}
-        onAddAssistant={handleAddAssistant}
-        onRemoveAssistant={handleRemoveAssistant}
-        onTogglePermission={handleToggleAssistantPermission}
-      />
-
-      {/* Modern Bottom Navigation */}
+      {/* Customer Bottom Navigation (Zero Add Button) */}
       <BottomNavigation
-        activeTab={activeTab}
+        activeTab={activeBottomNavTab}
         cartCount={totalCartCount}
-        canAddProducts={canAddProducts}
-        onNavigate={handleNavigate}
+        wishlistCount={wishlistIds.length}
+        onNavigate={handleCustomerNavigate}
       />
     </div>
   );

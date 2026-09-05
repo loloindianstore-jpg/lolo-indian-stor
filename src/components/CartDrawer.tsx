@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { CartItem, DiscountSettings } from '../types';
+import { CartItem, DiscountSettings, Order } from '../types';
 import {
   X,
   Trash2,
@@ -13,6 +13,7 @@ import {
   Check,
   MessageCircle,
   Tag,
+  Percent,
 } from 'lucide-react';
 
 interface CartDrawerProps {
@@ -23,6 +24,7 @@ interface CartDrawerProps {
   onUpdateQuantity: (productId: string, quantity: number) => void;
   onRemoveItem: (productId: string) => void;
   onClearCart: () => void;
+  onPlaceOrder: (order: Order) => void;
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({
@@ -33,23 +35,32 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   onUpdateQuantity,
   onRemoveItem,
   onClearCart,
+  onPlaceOrder,
 }) => {
   const [isCheckingOut, setIsCheckingOut] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [city, setCity] = useState('بغداد');
+  const [notes, setNotes] = useState('');
+  const [couponCode, setCouponCode] = useState('');
+  const [appliedCouponDiscount, setAppliedCouponDiscount] = useState(0);
+  const [couponError, setCouponError] = useState('');
   const [orderSuccess, setOrderSuccess] = useState(false);
   const [copiedLink, setCopiedLink] = useState(false);
   const [showShareBox, setShowShareBox] = useState(false);
 
   if (!isOpen) return null;
 
-  // Compute prices with discount if active
+  // Compute base discount and coupon
   const calculateItemPrice = (originalPrice: number) => {
+    let effective = originalPrice;
     if (discount.isEnabled && discount.percentage > 0) {
-      return Math.round(originalPrice * (1 - discount.percentage / 100));
+      effective = Math.round(effective * (1 - discount.percentage / 100));
     }
-    return originalPrice;
+    if (appliedCouponDiscount > 0) {
+      effective = Math.round(effective * (1 - appliedCouponDiscount / 100));
+    }
+    return effective;
   };
 
   const rawSubtotal = cartItems.reduce(
@@ -66,10 +77,23 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
   const deliveryFee = cartItems.length > 0 ? 5000 : 0; // 5000 IQD standard delivery
   const total = discountedSubtotal + deliveryFee;
 
+  // Apply SHEIN-style coupon
+  const handleApplyCoupon = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCouponError('');
+    const code = couponCode.trim().toUpperCase();
+    if (code === 'LULU10' || code === 'INDIA10') {
+      setAppliedCouponDiscount(10);
+    } else if (code === 'LULU20' || code === 'SHEIN20') {
+      setAppliedCouponDiscount(20);
+    } else {
+      setCouponError('الكوبون غير صالح أو منتهي الصلاحية. جربي كود LULU10');
+    }
+  };
+
   // Generate shareable cart link
   const getShareableCartUrl = () => {
     try {
-      // Serialize essential cart data: id, quantity, and product snapshot
       const payload = cartItems.map((it) => ({
         id: it.product.id,
         title: it.product.title,
@@ -80,7 +104,6 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
         q: it.quantity,
       }));
       const jsonStr = JSON.stringify(payload);
-      // Safe base64 encode for UTF-8
       const encoded = btoa(unescape(encodeURIComponent(jsonStr)));
       const url = new URL(window.location.href);
       url.searchParams.set('cart', encoded);
@@ -109,9 +132,24 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
   const handleCompleteOrder = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName || !customerPhone) return;
+    if (!customerName.trim() || !customerPhone.trim()) return;
 
+    const newOrder: Order = {
+      id: `ord_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone.trim(),
+      city,
+      notes: notes.trim(),
+      items: [...cartItems],
+      total,
+      discountSavings: totalDiscountSavings,
+      createdAt: Date.now(),
+      status: 'new',
+    };
+
+    onPlaceOrder(newOrder);
     setOrderSuccess(true);
+
     setTimeout(() => {
       onClearCart();
       setOrderSuccess(false);
@@ -155,7 +193,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 title="مشاركة رابط هذه السلة"
               >
                 <Share2 className="w-4 h-4" />
-                <span className="hidden xs:inline">مشاركة السلة</span>
+                <span className="hidden xs:inline">مشاركة</span>
               </button>
             )}
             <button
@@ -170,7 +208,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
 
         {/* Delivery banner */}
         <div className="bg-[#2E1E17] text-[#F3EBE1] text-xs py-2 px-4 text-center font-medium flex items-center justify-center gap-2">
-          <span>🚚 الدفع عند الاستلام متاح لجميع محافظات العراق</span>
+          <span>🚚 الدفع عند الاستلام لكافة محافظات العراق</span>
           {discount.isEnabled && (
             <span className="bg-[#9E4B3E] text-white text-[10px] font-bold px-2 py-0.5 rounded-full">
               خصم {discount.percentage}%
@@ -178,7 +216,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
           )}
         </div>
 
-        {/* Shareable Cart Link Box (رابط لكل سلة يمكن مشاركتها) */}
+        {/* Shareable Cart Link Box */}
         {showShareBox && cartItems.length > 0 && (
           <div className="bg-[#FAF3EA] p-3.5 border-b border-[#EADFCF] space-y-2.5 animate-in fade-in slide-in-from-top-2">
             <div className="flex items-center justify-between">
@@ -244,7 +282,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 شكراً لتسوقكِ من متجر لولو الهندية. سنتواصل معكِ هاتفياً لتأكيد الشحن إلى {city}.
               </p>
               <div className="text-xs font-bold text-[#34533F] bg-[#EBF3ED] px-4 py-2 rounded-xl">
-                المجموع: {total.toLocaleString('ar-IQ')} د.ع
+                المجموع الكلي: {total.toLocaleString('ar-IQ')} د.ع
               </div>
             </div>
           ) : cartItems.length === 0 ? (
@@ -275,12 +313,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   className="text-xs text-[#34533F] font-bold flex items-center gap-1"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" />
-                  <span>العودة للسلة</span>
+                  <span>العودة لمراجعة السلة</span>
                 </button>
               </div>
 
               <h4 className="text-base font-extrabold text-[#2C1E18]">
-                بيانات التوصيل (العراق)
+                بيانات استلام الطلب (العراق)
               </h4>
 
               <div>
@@ -292,7 +330,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   type="text"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
-                  placeholder="مثال: زينب علي"
+                  placeholder="مثال: مريم أحمد"
                   className="w-full bg-white text-sm rounded-xl py-2.5 px-3 border border-[#DECDBE] focus:outline-none focus:border-[#34533F]"
                 />
               </div>
@@ -329,21 +367,38 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <option value="نينوى (الموصل)">نينوى (الموصل)</option>
                   <option value="السليمانية">السليمانية</option>
                   <option value="بابل (الحلة)">بابل (الحلة)</option>
+                  <option value="كركوك">كركوك</option>
+                  <option value="ديالى">ديالى</option>
+                  <option value="ذي قار (الناصرية)">ذي قار (الناصرية)</option>
                   <option value="محافظة أخرى">محافظة أخرى</option>
                 </select>
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-[#3E2B1E] mb-1">
+                  العنوان بالتفصيل أو ملاحظات التوصيل
+                </label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="المنطقة، أقرب نقطة دالة..."
+                  className="w-full bg-white text-sm rounded-xl py-2.5 px-3 border border-[#DECDBE] focus:outline-none focus:border-[#34533F]"
+                />
+              </div>
+
+              {/* Order Summary in Checkout */}
               <div className="bg-[#F6EFE6] p-3.5 rounded-xl border border-[#E9DAC8] text-xs space-y-1.5 text-[#5C4B3D]">
                 <div className="flex justify-between font-medium">
                   <span>سعر المنتجات:</span>
                   <span>{rawSubtotal.toLocaleString('ar-IQ')} د.ع</span>
                 </div>
 
-                {discount.isEnabled && totalDiscountSavings > 0 && (
+                {totalDiscountSavings > 0 && (
                   <div className="flex justify-between font-bold text-[#9E4B3E]">
                     <span className="flex items-center gap-1">
                       <Tag className="w-3 h-3" />
-                      <span>خصم العرض ({discount.percentage}%):</span>
+                      <span>خصومات العروض والكوبونات:</span>
                     </span>
                     <span>-{totalDiscountSavings.toLocaleString('ar-IQ')} د.ع</span>
                   </div>
@@ -354,14 +409,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   <span>{deliveryFee.toLocaleString('ar-IQ')} د.ع</span>
                 </div>
                 <div className="flex justify-between font-black text-sm text-[#2A1D16] pt-2 border-t border-[#E3D3BF]">
-                  <span>الإجمالي عند الاستلام:</span>
+                  <span>المبلغ الإجمالي عند الاستلام:</span>
                   <span>{total.toLocaleString('ar-IQ')} د.ع</span>
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-3 rounded-full bg-[#34533F] text-white font-bold text-sm hover:bg-[#284131] transition-colors shadow-md flex items-center justify-center gap-2 mt-4"
+                className="w-full py-3 rounded-full bg-[#34533F] text-white font-bold text-sm hover:bg-[#284131] transition-colors shadow-md flex items-center justify-center gap-2 mt-4 cursor-pointer"
               >
                 <span>تأكيد الطلب والدفع عند الاستلام</span>
               </button>
@@ -391,7 +446,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                         <span className="text-xs font-black text-[#7A4E2B]">
                           {itemTotal.toLocaleString('ar-IQ')} د.ع
                         </span>
-                        {discount.isEnabled && (
+                        {(discount.isEnabled || appliedCouponDiscount > 0) && (
                           <span className="text-[10px] text-[#A89887] line-through">
                             {(item.product.price * item.quantity).toLocaleString('ar-IQ')} د.ع
                           </span>
@@ -437,6 +492,33 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                   </div>
                 );
               })}
+
+              {/* SHEIN-style Coupon Input in Cart */}
+              <div className="pt-2">
+                <form onSubmit={handleApplyCoupon} className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={couponCode}
+                    onChange={(e) => setCouponCode(e.target.value)}
+                    placeholder="كوبون الخصم (مثال: LULU10)"
+                    className="flex-1 bg-white text-xs rounded-xl py-2 px-3 border border-[#DECDBE] text-right font-mono uppercase focus:outline-none focus:border-[#34533F]"
+                  />
+                  <button
+                    type="submit"
+                    className="py-2 px-3 rounded-xl bg-[#FAF0E6] hover:bg-[#F2E4D5] text-[#7A4E2B] font-bold text-xs border border-[#E5DACB]"
+                  >
+                    تطبيق الكوبون
+                  </button>
+                </form>
+                {couponError && (
+                  <span className="text-[11px] text-red-600 block mt-1">{couponError}</span>
+                )}
+                {appliedCouponDiscount > 0 && (
+                  <span className="text-[11px] text-emerald-700 font-bold block mt-1">
+                    ✓ تم تطبيق خصم الكوبون الإضافي بنسبة {appliedCouponDiscount}%!
+                  </span>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -452,11 +534,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 </span>
               </div>
 
-              {discount.isEnabled && totalDiscountSavings > 0 && (
+              {totalDiscountSavings > 0 && (
                 <div className="flex justify-between font-bold text-[#9E4B3E]">
                   <span className="flex items-center gap-1">
                     <Tag className="w-3 h-3" />
-                    <span>خصم العرض ({discount.percentage}%):</span>
+                    <span>إجمالي الخصم المتوفر:</span>
                   </span>
                   <span>-{totalDiscountSavings.toLocaleString('ar-IQ')} د.ع</span>
                 </div>
@@ -482,7 +564,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({
                 id="proceed-checkout-btn"
                 type="button"
                 onClick={() => setIsCheckingOut(true)}
-                className="flex-1 py-3 px-5 rounded-full bg-[#34533F] text-white font-bold text-sm sm:text-base hover:bg-[#284131] transition-all shadow-md active:scale-98 flex items-center justify-center gap-2"
+                className="flex-1 py-3 px-5 rounded-full bg-[#34533F] text-white font-bold text-sm sm:text-base hover:bg-[#284131] transition-all shadow-md active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
               >
                 <span>متابعة إتمام الطلب</span>
               </button>
